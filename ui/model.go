@@ -17,7 +17,10 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
+	"github.com/common-nighthawk/go-figure"
 )
+
+var ascii = figure.NewFigure("L2", "banner4", true).Slicify()
 
 // Model represents the main UI model
 type Model struct {
@@ -73,9 +76,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		// Calculate viewport dimensions
 		viewportWidth := msg.Width - 2
-		viewportHeight := msg.Height - 3 // 1 for textarea, 2 for borders
+		viewportHeight := msg.Height - (len(ascii) + 3)
 
 		if viewportWidth < 1 {
 			viewportWidth = 1
@@ -84,7 +86,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			viewportHeight = 1
 		}
 
-		// Re-create viewport with new dimensions
 		vp := viewport.New(viewportWidth, viewportHeight)
 		vp.Style = lipgloss.NewStyle().
 			BorderStyle(lipgloss.RoundedBorder()).
@@ -105,7 +106,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.glam = glam
 
-		// Initialize viewport with current content
 		m.updateViewportContent()
 
 	case tickMsg:
@@ -413,7 +413,6 @@ func (m *Model) updateViewportContent() {
 // updateViewportContentInternal does the actual viewport update without throttling
 func (m *Model) updateViewportContentInternal() {
 	logs := strings.Builder{}
-	logs.WriteString("=== Conversation Log ===\n\n")
 
 	historyToShow := m.history
 	if len(historyToShow) > m.maxHistoryDisplay {
@@ -470,9 +469,44 @@ func (m *Model) View() string {
 	centerStyle := lipgloss.NewStyle().AlignHorizontal(lipgloss.Center)
 
 	m.ta.SetWidth(m.width - 2)
-	doc := []string{
-		centerStyle.Width(m.width).Render(m.hold.View()),
-		centerStyle.Width(m.width).Render(m.ta.View()),
+
+	var doc []string
+
+	if m.height > 20 {
+		doc = []string{}
+
+		maxLength := 0
+		for _, row := range ascii {
+			trimmedRow := strings.TrimLeft(row, " ")
+			if len(trimmedRow) > maxLength {
+				maxLength = len(trimmedRow)
+			}
+		}
+
+		colors := []lipgloss.Color{
+			lipgloss.Color("#FF6B6B"), // Red
+			lipgloss.Color("#4ECDC4"), // Teal
+			lipgloss.Color("#45B7D1"), // Blue
+			lipgloss.Color("#96CEB4"), // Green
+			lipgloss.Color("#FFEAA7"), // Yellow
+			lipgloss.Color("#DDA0DD"), // Plum
+			lipgloss.Color("#98D8C8"), // Mint
+		}
+
+		for i, row := range ascii {
+			trimmedRow := strings.TrimLeft(row, " ")
+			paddedRow := trimmedRow + strings.Repeat(" ", maxLength-len(trimmedRow))
+			colorStyle := lipgloss.NewStyle().Foreground(colors[i%len(colors)])
+			coloredRow := colorStyle.Render(paddedRow)
+			doc = append(doc, centerStyle.Width(m.width).Render(coloredRow))
+		}
+		doc = append(doc, centerStyle.Width(m.width).Render(m.hold.View()))
+		doc = append(doc, centerStyle.Width(m.width).Render(m.ta.View()))
+	} else {
+		doc = []string{
+			centerStyle.Width(m.width).Render(m.hold.View()),
+			centerStyle.Width(m.width).Render(m.ta.View()),
+		}
 	}
 
 	return lipgloss.JoinVertical(lipgloss.Top, doc...)

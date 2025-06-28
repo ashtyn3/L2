@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"l2/storage"
+	"l2/tools"
 
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -369,7 +371,13 @@ func (m *Model) startStreaming(userMessage string) tea.Cmd {
 					}
 
 					if message.Content != "" {
-						m.tokenChan <- message.Content
+						content := message.Content
+
+						if strings.Contains(content, `"success":true`) || strings.Contains(content, `"success":false`) {
+							content = m.formatToolResult(content)
+						}
+
+						m.tokenChan <- content
 					}
 
 					m.UpdateStats(storage.Stats{TotalTokens: m.stats.TotalTokens + 1})
@@ -553,4 +561,94 @@ func (m *Model) resetOptimizationParams() {
 	m.maxResponseLength = 0 // Disable truncation
 	m.renderBuffer = 5
 	m.renderThrottle = 100 * time.Millisecond
+}
+
+func (m *Model) formatToolResult(content string) string {
+	if strings.Contains(content, `"success":true`) {
+		if strings.Contains(content, `"entries"`) {
+			return m.formatLexiconResult(content)
+		} else if strings.Contains(content, `"content"`) {
+			return m.formatFileResult(content)
+		} else if strings.Contains(content, `"message"`) {
+			return m.formatSuccessMessage(content)
+		}
+	} else if strings.Contains(content, `"success":false`) {
+		return m.formatErrorMessage(content)
+	}
+
+	return content
+}
+
+func (m *Model) formatLexiconResult(content string) string {
+	var result tools.LexiconResult
+
+	if err := json.Unmarshal([]byte(content), &result); err != nil {
+		return content
+	}
+
+	var formatted strings.Builder
+	formatted.WriteString(fmt.Sprintf("**%s**\n\n", result.Message))
+
+	if len(result.Entries) > 0 {
+		formatted.WriteString("**Lexicon Entries:**\n\n")
+		for _, entry := range result.Entries {
+			formatted.WriteString(fmt.Sprintf("• **%s**", entry.Word))
+			if entry.PartOfSpeech != "" {
+				formatted.WriteString(fmt.Sprintf(" (%s)", entry.PartOfSpeech))
+			}
+			formatted.WriteString(fmt.Sprintf(": %s", entry.Definition))
+			if entry.Etymology != "" {
+				formatted.WriteString(fmt.Sprintf(" [Etymology: %s]", entry.Etymology))
+			}
+			formatted.WriteString("\n\n")
+		}
+	}
+
+	return formatted.String()
+}
+
+func (m *Model) formatFileResult(content string) string {
+	var result tools.Result
+
+	if err := json.Unmarshal([]byte(content), &result); err != nil {
+		return content
+	}
+
+	var formatted strings.Builder
+	formatted.WriteString(fmt.Sprintf("✅ **%s**\n\n", result.Message))
+
+	if result.Content != "" {
+		formatted.WriteString("**File Content:**\n\n")
+		formatted.WriteString("```\n")
+		formatted.WriteString(result.Content)
+		formatted.WriteString("\n```\n")
+	}
+
+	return formatted.String()
+}
+
+func (m *Model) formatSuccessMessage(content string) string {
+	var result struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+	}
+
+	if err := json.Unmarshal([]byte(content), &result); err != nil {
+		return content
+	}
+
+	return fmt.Sprintf("✅ **%s**", result.Message)
+}
+
+func (m *Model) formatErrorMessage(content string) string {
+	var result struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+	}
+
+	if err := json.Unmarshal([]byte(content), &result); err != nil {
+		return content
+	}
+
+	return fmt.Sprintf("❌ **Error:** %s", result.Message)
 }
